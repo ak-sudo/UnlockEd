@@ -62,7 +62,7 @@ app.get("/api/quiz", async (req, res) => {
       .trim();
     const parsed = JSON.parse(text);
 
-    res.json(parsed.quiz || parsed.questions || []);
+    res.json(parsed || parsed?.data?.questions);
   } catch (err) {
     console.error("Quiz fetch error:", err.message);
     res.status(500).json({ error: "Failed to fetch quiz" });
