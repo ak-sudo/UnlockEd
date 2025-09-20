@@ -3,9 +3,14 @@ dotenv.config();
 const express = require("express");
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 const cors = require("cors");
+const multer = require("multer");
+const fs = require("fs");
+const path = require("path");
 
 const app = express();
 app.use(cors({ origin: "*" }));
+
+const upload = multer({ dest: "uploads/" });
 
 app.use(express.json());
 
@@ -99,8 +104,8 @@ app.post("/api/quiz/analyze", async (req, res) => {
   try {
     const { answers } = req.body;
 
-
-    const result = await model.generateContent(`The user has completed a career quiz. 
+    const result =
+      await model.generateContent(`The user has completed a career quiz. 
       Here are the answers: ${JSON.stringify(answers)}.
       You are an expert career counselor. Your task is to analyze the student's quiz responses 
 and recommend the most suitable career paths.  
@@ -155,12 +160,152 @@ Return the response strictly in **JSON format** as:
       .trim();
 
     const parsed = JSON.parse(text);
-    console.log("Parsed analysis:", parsed);
 
     res.json(parsed);
   } catch (err) {
     console.error("Quiz analyze error:", err.message);
     res.status(500).json({ error: "Failed to analyze answers" });
+  }
+});
+
+app.post(
+  "/api/placement/analyze",
+  upload.single("resume"),
+  async (req, res) => {
+    try {
+      const { name, gpa, dreamCompany, domain } = req.body;
+      const resumeFile = req.file;
+
+      // Optional: Extract resume text (plain text expected, not PDF/Doc parsing here)
+      let resumeText = "";
+      if (resumeFile) {
+        try {
+          resumeText = fs.readFileSync(
+            path.join(resumeFile.destination, resumeFile.filename),
+            "utf-8"
+          );
+        } catch (err) {
+          console.warn("Could not read resume text, continuing...");
+        }
+      }
+
+      // 🔹 Detailed prompt
+      const prompt = `
+You are an AI Placement Mentor. Analyze the following student's details and return actionable insights in **strict JSON only**.
+
+STUDENT DATA:
+- Name: ${name}
+- GPA: ${gpa}
+- Dream Company: ${dreamCompany}
+- Domain: ${domain}
+- Resume: ${resumeText || "Not provided"}
+
+### Instructions:
+1. Suggest "career roles" suitable for this candidate.
+2. Perform "gap analysis": missing/weak skills that should be improved.
+3. Compute a "placement_readiness_index" (0–100).
+4. Suggest "top 5 companies" (with short reasoning why).
+5. Provide a "skill_score breakdown" (each skill rated 0–10, so frontend can build graphs).
+6. Suggest an "action plan" (stepwise).
+7. Recommend "mock interview topics".
+
+### Strict JSON Output Example:
+{
+  "career_match": ["Software Engineer", "Data Analyst"],
+  "gap_analysis": ["System Design", "Advanced SQL"],
+  "placement_readiness_index": 78,
+  "suggested_companies": [
+    {"name": "Google", "reason": "Strong in algorithms, high GPA fit"},
+    {"name": "Accenture", "reason": "Good for consulting + domain"},
+    {"name": "Infosys", "reason": "Training + large intake"},
+    {"name": "Cisco", "reason": "Domain match: Networking"},
+    {"name": "Deloitte", "reason": "Consulting + analytics domain"}
+  ],
+  "skill_scores": {
+    "DSA": 7,
+    "OOPs": 6,
+    "Databases": 5,
+    "System Design": 4,
+    "Communication": 8
+  },
+  "action_plan": [
+    "Complete 50 LeetCode problems in 30 days",
+    "Build 1 domain-specific project",
+    "Revise DBMS & OS fundamentals"
+  ],
+  "mock_interview_topics": ["OOPs", "SQL Joins", "System Design Basics"]
+}
+`;
+
+      const result = await model.generateContent(prompt);
+      let analysis = result.response.text();
+
+      analysis = analysis
+        .replace(/```json/gi, "")
+        .replace(/```/g, "")
+        .trim();
+
+      // Parse safely
+      const parsed = JSON.parse(analysis);
+
+      res.json({ success: true, analysis: parsed });
+
+    } catch (err) {
+      console.error("Error in /placement/analyze:", err.message);
+      res.status(500).json({ success: false, error: "Analysis failed" });
+    }
+  }
+);
+
+app.post("/api/placement/company-info", async (req, res) => {
+  try {
+    const { companyName, candidateContext } = req.body || {};
+
+    if (!companyName)
+      return res
+        .status(400)
+        .json({ success: false, message: "companyName is required" });
+
+    // 3️⃣ Prompt for structured JSON
+    const prompt = `
+You are a concise hiring advisor. Produce EXACTLY a JSON object matching this schema:
+
+{
+  "overview": string,
+  "roles": [string],
+  "interview_format": string,
+  "tips": [string],
+  "apply_link": string,
+  "required_skills": [string],
+  "locations": [string],
+  "approx_compensation": string,
+  "notes": string
+}
+
+Company name: "${companyName}"
+Candidate context (may be empty): ${JSON.stringify(candidateContext || {})}
+
+Return valid JSON only.
+`;
+
+    const response = await model.generateContent(prompt);
+
+    let analysis = response.response.text();
+
+    analysis = analysis
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .trim();
+
+    let parsed = JSON.parse(analysis);
+
+    res.json({ success: true, company_info: parsed });
+  } catch (err) {
+    console.error("company-info error:", err);
+    return res.status(500).json({
+      success: false,
+      message: "Server error while fetching company info",
+    });
   }
 });
 
