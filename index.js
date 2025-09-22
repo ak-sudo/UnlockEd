@@ -99,6 +99,123 @@ Return only valid **JSON format** as:
   }
 });
 
+app.get("/api/gyan/quiz", async (req, res) => {
+  console.log("Received request for /api/gyan/quiz");
+  try {
+    const prompt = `
+   Generate 20 career interest quiz questions for Indian school students from class 6 to 12 (ages 11-18).
+
+Questions should cover a wide range of fields, not just technology. Include arts, commerce, law, medicine, teaching, journalism, sports, entrepreneurship, etc.
+
+Each question should be simple, unbiased, and easy to understand for ages 11-18.
+
+Respond in JSON format as a list of objects with the following fields:
+
+id (string): unique question number
+
+question (short, clean text)
+
+category (string): the broad career domain the question relates to (e.g., coding, arts, commerce, law, medicine, teaching, journalism, sports, entrepreneurship, etc.)
+    Example:
+    [
+      {"id":"1","question":"Do you enjoy solving puzzles and coding challenges?","category":"coding"},
+      {"id":"2","question":"Do you like creating paintings or designing posters?","category":"arts"}
+      ... etc
+    ]
+    Ensure all questions are engaging, unbiased, and suitable for school students.
+    `;
+
+    const result = await model.generateContent(prompt);
+    let text = result.response.text();
+    text = result.response
+      .text()
+      .replace(/```json|```/g, "")
+      .trim();
+    const parsed = JSON.parse(text);
+
+    // Try parsing JSON from Gemini
+    let questions;
+    try {
+      questions = parsed;
+    } catch (e) {
+      console.error("Parsing error:", e.message);
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to parse Gemini response" });
+    }
+
+    res.json({ success: true, total: questions.length, questions });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
+app.post("/api/gyan/roadmaps", async (req, res) => {
+  try {
+    const { student, quizAnswers } = req.body;
+
+    const prompt = `
+You are a career guidance expert for Indian school students. Based on the following student profile and quiz answers, generate 10 career roadmaps that are relevant, realistic, and unbiased.
+
+Student Profile:
+${JSON.stringify(student)}
+
+Quiz Answers:
+${JSON.stringify(quizAnswers)}
+
+Each career roadmap must include the following fields:
+- id (string): unique identifier for the career path
+- title (string): career path name
+- stream_suggestion (string): recommended stream in school (Arts, Science, Commerce, etc.)
+- summary (short description of the career path)
+- recommended_for_grades (object): { "min": number, "max": number } indicating suitable school grades
+- courses (array of objects) each including:
+  - name (string)
+  - level (string, e.g., beginner, diploma, undergraduate, postgraduate)
+  - duration_years (number)
+  - description (short text)
+  - outcome (object): { "skills": [string], "roles": [string], "expected_salary_range": string }
+- course_recommendations_post_12th (array of course names)
+- graph_demand (object): { "labels": [years], "values": [numbers] } showing demand forecast over time
+- icons (object): { "main": string } (suggest an icon keyword, e.g., "AiFillRobot")
+- confidence (number between 0 and 1, indicating how well the career matches the student profile)
+
+Instructions:
+1. Respond strictly as a JSON array containing exactly 10 objects.
+2. Ensure all career paths are age-appropriate, unbiased, and aligned with Indian education standards.
+3. Include diverse career fields (arts, commerce, science, law, medicine, teaching, entrepreneurship, journalism, sports, technology, etc.).
+4. Use realistic course names, durations, skills, and roles relevant to India.
+5. graph_demand should reflect future demand trends (can be approximate but realistic).
+6. Make JSON well-structured and ready to use in a career guidance application.
+
+    `;
+
+    const result = await model.generateContent(prompt);
+    let text = result.response.text();
+    text = result.response
+      .text()
+      .replace(/```json|```/g, "")
+      .trim();
+    const parsed = JSON.parse(text);
+
+    let roadmaps;
+    try {
+      roadmaps = parsed;
+    } catch (e) {
+      console.error("Parsing error:", e.message);
+      return res
+        .status(500)
+        .json({ success: false, error: "Failed to parse Gemini response" });
+    }
+
+    res.json({ success: true, roadmaps });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: "Server error" });
+  }
+});
+
 // ✅ Analyze Answers
 app.post("/api/quiz/analyze", async (req, res) => {
   try {
@@ -209,6 +326,7 @@ STUDENT DATA:
 6. Suggest an "action plan" (stepwise).
 7. Recommend "mock interview topics".
 
+
 ### Strict JSON Output Example:
 {
   "career_match": ["Software Engineer", "Data Analyst"],
@@ -249,7 +367,6 @@ STUDENT DATA:
       const parsed = JSON.parse(analysis);
 
       res.json({ success: true, analysis: parsed });
-
     } catch (err) {
       console.error("Error in /placement/analyze:", err.message);
       res.status(500).json({ success: false, error: "Analysis failed" });
