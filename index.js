@@ -17,6 +17,59 @@ app.use(express.json());
 const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
 
+app.post("/api/resume/enhance", async (req, res) => {
+  try {
+    const resumeData = req.body;
+
+    const prompt = `
+You are a professional resume writer.
+Here is a user's raw resume data in JSON:
+${JSON.stringify(resumeData, null, 2)}
+
+Task:
+1. Rewrite and enhance the summary to make it professional and ATS-friendly.
+2. Improve role descriptions in "experience" to be impactful with action verbs and measurable outcomes.
+3. Refine "projects" to highlight achievements, technologies, and impact.
+4. Suggest better phrasing for skills and achievements.
+
+Return the enhanced resume in JSON format, keeping the same structure:
+{
+  "name": "",
+  "title": "",
+  "email": "",
+  "phone": "",
+  "summary": "",
+  "skills": [],
+  "experience": [{ "role": "", "company": "", "duration": "", "description": "" }],
+  "education": [{ "degree": "", "institution": "", "duration": "" }],
+  "projects": [{ "name": "", "description": "" }],
+  "achievements": []
+}
+    `;
+
+    const result = await model.generateContent(prompt);
+
+    const resp = result.response
+      .text()
+      .replace(/```json|```/g, "")
+      .trim();
+    const parsed = JSON.parse(resp);
+
+    let enhancedResume;
+    try {
+      enhancedResume = parsed
+    } catch (err) {
+      console.error("Gemini response parsing failed:", resp);
+      return res.status(500).json({ error: "AI response parsing failed" });
+    }
+
+    res.json(enhancedResume);
+  } catch (error) {
+    console.error("Enhancement error:", error);
+    res.status(500).json({ error: "Resume enhancement failed" });
+  }
+});
+
 app.post("/api/domain-info", async (req, res) => {
   try {
     const { prompt } = req.body;
@@ -424,6 +477,61 @@ Return valid JSON only.
       message: "Server error while fetching company info",
     });
   }
+});
+
+app.post('/generate-pdf', (req, res) => {
+    const resumeData = req.body;
+
+    // Helper function to generate HTML for a section
+    const generateHtmlForSection = (title, items) => {
+        if (!items || items.length === 0) return '';
+        
+        return `
+            <h4 style="font-weight: bold; margin-top: 15px;">${title}</h4>
+            ${items.map(item => `
+                <div style="margin-top: 8px;">
+                    <p style="font-weight: bold;">${item.title || ''}${item.company ? ` - ${item.company}` : ''}</p>
+                    ${item.duration ? `<p style="font-size: 12px; color: #555;">${item.duration}</p>` : ''}
+                    <ul style="margin-left: 20px; padding: 0;">
+                        ${item.bullets.map(bullet => `
+                            <li>${bullet}</li>
+                        `).join('')}
+                    </ul>
+                </div>
+            `).join('')}
+        `;
+    };
+
+    // Constructing the HTML content for the PDF
+    const htmlContent = `
+        <div style="font-family: Arial, sans-serif; padding: 20px; border: 1px solid #ccc; max-width: 800px; margin: auto;">
+            <h3 style="font-size: 24px; font-weight: bold; margin-bottom: 5px;">${resumeData.name}</h3>
+            <p style="font-size: 14px; color: #555;">${resumeData.role} - ${resumeData.email} - ${resumeData.phone}</p>
+            <p style="margin-top: 10px;">${resumeData.summary}</p>
+            
+            ${generateHtmlForSection('Experience', resumeData.experience)}
+            ${generateHtmlForSection('Projects', resumeData.projects)}
+
+            ${resumeData.skills && resumeData.skills.length > 0 ? `
+                <h4 style="font-weight: bold; margin-top: 15px;">Skills</h4>
+                <p>${resumeData.skills.join(', ')}</p>
+            ` : ''}
+        </div>
+    `;
+
+    // PDF options
+    const options = { format: 'A4', orientation: 'portrait' };
+
+    // Create PDF from HTML string
+    pdf.create(htmlContent, options).toBuffer((err, buffer) => {
+        if (err) {
+            console.error("PDF creation error:", err);
+            return res.status(500).send('Error generating PDF');
+        }
+        res.setHeader('Content-Type', 'application/pdf');
+        res.setHeader('Content-Disposition', 'attachment; filename=resume.pdf');
+        res.send(buffer);
+    });
 });
 
 app.listen(3000, () => console.log("Server running on port 3000"));
